@@ -14,5 +14,10 @@
     "lib": ["DOM", "ESNext"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "node_modules/three/src/nodes/materialx/lib/mx_noise.js", // ← this kills the spam
+    "**/mx_noise.js"
+  ]
 }

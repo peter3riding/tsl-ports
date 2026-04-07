@@ -1,7 +1,35 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import GUI from "lil-gui";
-import { uv, pass, vec4 } from "three/tsl"; // ← pass is now imported here
+import {
+  pass,
+  abs,
+  atan,
+  clamp,
+  cos,
+  distance,
+  dot,
+  floor,
+  fract,
+  length,
+  max,
+  min,
+  mix,
+  mod,
+  PI,
+  sin,
+  step,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+  div,
+  Fn,
+  add,
+  sub,
+  mul,
+  mx_noise_float,
+} from "three/tsl";
 
 (async () => {
   /**
@@ -16,17 +44,38 @@ import { uv, pass, vec4 } from "three/tsl"; // ← pass is now imported here
   // Scene
   const scene = new THREE.Scene();
 
+  // Rotate function
+  const rotate = Fn(([uv, rotation, mid]: any[]) => {
+    return vec2(
+      cos(rotation)
+        .mul(uv.x.sub(mid.x))
+        .add(sin(rotation).mul(uv.y.sub(mid.y)))
+        .add(mid.x),
+
+      cos(rotation)
+        .mul(uv.y.sub(mid.y))
+        .sub(sin(rotation).mul(uv.x.sub(mid.x)))
+        .add(mid.y),
+    );
+  });
   /**
-   * Test mesh – fully TSL (no GLSL files)
+   * Test mesh
    */
   // Geometry
   const geometry = new THREE.PlaneGeometry(1, 1, 32, 32);
 
   // Material
   const material = new THREE.MeshBasicNodeMaterial();
+  const angle = atan(uv().x.sub(0.5), uv().y.sub(0.5)).div(PI.mul(2)).add(0.5);
+
+  const strength = step(0.9, sin(mx_noise_float(uv().mul(10)).mul(20)));
+
+  const blackColor = vec3(0);
+  const uvColor = vec3(uv(), 1);
+  const mixedColor = mix(blackColor, uvColor, strength);
 
   // Color
-  material.colorNode = vec4(0.5, 0.0, 1.0, 1.0);
+  material.colorNode = vec4(mixedColor, 1.0);
 
   // Mesh
   const mesh = new THREE.Mesh(geometry, material);
