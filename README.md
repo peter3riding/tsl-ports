@@ -28,7 +28,7 @@ This repo serves as:
 
 ---
 
-### 🛠 Tech Stack
+### Tech Stack
 
 - **Three.js** (latest) + **TSL** (Three.js Shading Language)
 - **TypeScript** (strict mode)
