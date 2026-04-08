@@ -31,9 +31,6 @@ import { sobel } from "three/addons/tsl/display/SobelOperatorNode.js";
   // Scene
   const scene = new THREE.Scene();
 
-  const fogColor = uniform(color("#ffffff"));
-  scene.fogNode = fog(fogColor, rangeFogFactor(10, 15));
-
   /**
    * Sizes
    */
@@ -67,7 +64,7 @@ import { sobel } from "three/addons/tsl/display/SobelOperatorNode.js";
   });
   renderer.setSize(sizes.width, sizes.height);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(fogColor.value);
+  //renderer.setClearColor(fogColor.value);
 
   // Required for new WebGPU / RenderPipeline API
   await renderer.init();
@@ -84,41 +81,18 @@ import { sobel } from "three/addons/tsl/display/SobelOperatorNode.js";
   postProcessing.outputNode = sobel(outputPass);
 
   /**
-   * Dummy / Wobbly Torus
+   * Water
    */
+  // Geometry
+  const waterGeometry = new THREE.PlaneGeometry(2, 2, 128, 128);
+
   // Material
-  const material = new THREE.MeshBasicNodeMaterial();
-
-  // Uniforms
-  const timeFrequency = uniform(0.5);
-  const positionFrequency = uniform(2);
-  const intensityFrequency = uniform(0.5);
-
-  // Position node
-  const oscillation = sin(
-    time.mul(timeFrequency).add(positionLocal.y.mul(positionFrequency)),
-  ).mul(intensityFrequency);
-
-  material.positionNode = vec3(
-    positionLocal.x.add(oscillation),
-    positionLocal.y,
-    positionLocal.z,
-  );
-
-  // Color node
-  material.colorNode = vec4(uv().mul(vec2(32, 8)).fract(), 1, 1);
+  const waterMaterial = new THREE.MeshBasicMaterial();
 
   // Mesh
-  const torusKnot = new THREE.Mesh(
-    new THREE.TorusKnotGeometry(1, 0.35, 128, 32),
-    material,
-  );
-  scene.add(torusKnot);
-
-  // GUI
-  gui.add(timeFrequency, "value").min(0).max(5).name("timeFrequency");
-  gui.add(positionFrequency, "value").min(0).max(5).name("positionFrequency");
-  gui.add(intensityFrequency, "value").min(0).max(5).name("intensityFrequency");
+  const water = new THREE.Mesh(waterGeometry, waterMaterial);
+  water.rotation.x = -Math.PI * 0.5;
+  scene.add(water);
 
   /**
    * Resize handler
