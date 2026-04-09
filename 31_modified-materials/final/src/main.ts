@@ -8,9 +8,6 @@ import {
   vec3,
   vec4,
   float,
-  rotate,
-  Fn,
-  transformNormalToView,
   // Time & Animation
   time,
   // Math
@@ -72,7 +69,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
     scene.traverse((child) => {
       if (
         child instanceof THREE.Mesh &&
-        child.material instanceof THREE.MeshStandardNodeMaterial
+        child.material instanceof THREE.MeshStandardMaterial
       ) {
         child.material.envMapIntensity = 1;
         child.material.needsUpdate = true;
@@ -97,89 +94,32 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
   scene.environment = environmentMap;
 
   /**
-   * Uniforms
-   */
-  const uTime = uniform(0);
-  /**
-   * Material
+   * Material — explicit typing removes any TS complaints
    */
   const mapTexture = textureLoader.load("/models/LeePerrySmith/color.jpg");
   mapTexture.colorSpace = THREE.SRGBColorSpace;
 
   const normalTexture = textureLoader.load("/models/LeePerrySmith/normal.jpg");
 
-  const material: THREE.MeshStandardNodeMaterial =
-    new THREE.MeshStandardNodeMaterial({
-      map: mapTexture,
-      normalMap: normalTexture,
-    });
-
-  // Position twist
-  material.positionNode = Fn(() => {
-    const p = positionLocal.toVar();
-    const angle = p.y.add(uTime).mul(0.9);
-    const rotated = rotate(p.xz, angle);
-    p.x = rotated.x;
-    p.z = rotated.y;
-    return p;
-  })();
-
-  // Normal correction
-
-  material.normalNode = Fn(() => {
-    const n = normalLocal.toVar();
-
-    // Use the same angle as positionNode
-    const angle = positionLocal.y.add(uTime).mul(0.9);
-
-    const rotated = rotate(n.xz, angle);
-
-    n.x = rotated.x;
-    n.z = rotated.y;
-
-    // This is the important part the article recommends
-    return transformNormalToView(n.normalize());
-  })();
-
-  // Shadow fix
-  material.castShadowPositionNode = material.positionNode;
+  const material: THREE.MeshStandardMaterial = new THREE.MeshStandardMaterial({
+    map: mapTexture,
+    normalMap: normalTexture,
+  });
 
   /**
    * Models
    */
   gltfLoader.load("/models/LeePerrySmith/LeePerrySmith.glb", (gltf) => {
+    // Model — cast to Mesh so .material and .rotation are recognized by TS
     const mesh = gltf.scene.children[0] as THREE.Mesh;
 
     mesh.rotation.y = Math.PI * 0.5;
-    mesh.material = material;
-
-    const depthMaterial = new THREE.MeshDepthMaterial({
-      depthPacking: THREE.RGBADepthPacking,
-    });
-    (depthMaterial as any).positionNode = material.positionNode;
-    (depthMaterial as any).normalNode = material.normalNode;
-
-    mesh.customDepthMaterial = depthMaterial;
-    mesh.castShadow = true;
-
+    mesh.material = material; // ← no more TS error
     scene.add(mesh);
 
     // Update materials
     updateAllMaterials();
   });
-
-  /**
-   * Plane
-   */
-  const plane = new THREE.Mesh(
-    new THREE.PlaneGeometry(15, 15, 15),
-    new THREE.MeshStandardNodeMaterial(),
-  );
-  plane.receiveShadow = true;
-  plane.rotation.y = Math.PI;
-  plane.position.y = -5;
-  plane.position.z = 5;
-  scene.add(plane);
 
   /**
    * Lights
@@ -191,11 +131,6 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
   directionalLight.shadow.normalBias = 0.05;
   directionalLight.position.set(0.25, 2, -2.25);
   scene.add(directionalLight);
-
-  // Add to your GUI for live tuning
-  gui
-    .add(directionalLight.shadow, "normalBias", 0, 0.5, 0.001)
-    .name("Shadow Normal Bias");
 
   /**
    * Sizes
@@ -276,7 +211,6 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
   const tick = () => {
     timer.update();
-    uTime.value = timer.getElapsed();
     controls.update();
 
     // Modern WebGPU render
