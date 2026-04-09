@@ -8,6 +8,8 @@ import {
   vec3,
   vec4,
   float,
+  Loop,
+  Fn,
 
   // Time & Animation
   time,
@@ -34,6 +36,9 @@ import {
   normalLocal,
   normalWorld,
 
+  // Noise
+  mx_noise_float,
+
   // UV & Texturing
   uv,
   texture,
@@ -43,6 +48,7 @@ import {
   renderOutput,
   fog,
   rangeFogFactor,
+  modelPosition,
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -61,29 +67,156 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   scene.background = new THREE.Color("#0a0a0a");
 
   /**
-   * Textures
+   * Water
    */
-  const textureLoader = new THREE.TextureLoader();
+  // Colors
+  type debugObjectType = {
+    depthColor: string;
+    surfaceColor: string;
+  };
 
-  /**
-   * Test mesh
-   */
-  // Geometry
-  const geometry = new THREE.PlaneGeometry(1, 1, 32, 32);
-
-  // Material (TSL — fully node-based)
-  const material = new THREE.MeshBasicNodeMaterial();
+  const debugObject: debugObjectType = {
+    depthColor: "#186691",
+    surfaceColor: "#9bd8ff",
+  };
 
   // ─── UNIFORMS ───
   const uTime = uniform(0);
-  const uColor = uniform(color("#ff0088"));
+  const uColor = uniform(color(0.5, 0.8, 1.0));
+  const uBigWavesElevation = uniform(0.2);
+  const uBigWavesFrequency = uniform(vec2(4, 1.5));
+  const uBigWavesSpeed = uniform(0.75);
+  const uDepthColor = uniform(color(debugObject.depthColor));
+  const uSurfaceColor = uniform(color(debugObject.surfaceColor));
+  const uColorOffset = uniform(0.22);
+  const uColorMultiplier = uniform(3);
+  const uSmallWavesFrequency = uniform(3);
+  const uSmallWavesElevation = uniform(0.15);
+  const uSmallIterations = uniform(4);
+  const uSmallWavesSpeed = uniform(0.2);
 
-  material.colorNode = uColor;
+  // Geometry
+  const waterGeometry = new THREE.PlaneGeometry(2, 2, 512, 512);
+
+  // Material
+  const waterMaterial = new THREE.MeshBasicNodeMaterial();
 
   // Mesh
-  const mesh = new THREE.Mesh(geometry, material);
-  scene.add(mesh);
+  const water = new THREE.Mesh(waterGeometry, waterMaterial);
+  waterGeometry.rotateX(-Math.PI * 0.5);
+  scene.add(water);
 
+  // Vertex
+  const wavesElevation = Fn(() => {
+    // Big waves
+    let elevation = mul(
+      sin(
+        positionLocal.x
+          .mul(uBigWavesFrequency.x)
+          .add(uTime.mul(uBigWavesSpeed)),
+      ),
+      sin(
+        positionLocal.z
+          .mul(uBigWavesFrequency.y)
+          .add(uTime.mul(uBigWavesSpeed)),
+      ),
+    );
+    elevation.mulAssign(uBigWavesElevation);
+
+    // Small waves
+    Loop({ start: float(1), end: uSmallIterations }, ({ i }) => {
+      const noiseInput = vec3(
+        positionLocal.xz.add(1).mul(uSmallWavesFrequency).mul(i), // +1 avoids seam
+        uTime.mul(uSmallWavesSpeed),
+      );
+
+      const wave = abs(
+        mx_noise_float(noiseInput, 1, 0) // amplitude=1, pivot=0 → -1 to 1
+          .mul(uSmallWavesElevation)
+          .div(i),
+      );
+
+      elevation.subAssign(wave);
+    });
+
+    return elevation;
+  });
+
+  // Apply to material 'Y' position
+  const elevation = wavesElevation();
+  waterMaterial.positionNode = positionLocal.add(vec3(0, elevation, 0));
+
+  // Fragment
+  const mixStrength = elevation.add(uColorOffset).mul(uColorMultiplier);
+  waterMaterial.colorNode = mix(uDepthColor, uSurfaceColor, mixStrength);
+
+  // Tweaks
+  // gui
+  //   .add(uBigWavesElevation, "value")
+  //   .min(0)
+  //   .max(1)
+  //   .step(0.001)
+  //   .name("uBigWavesElevation");
+  // gui
+  //   .add(uBigWavesFrequency.value, "x")
+  //   .min(0)
+  //   .max(10)
+  //   .step(0.001)
+  //   .name("uBigWavesFrequencyX");
+  // gui
+  //   .add(uBigWavesFrequency.value, "y")
+  //   .min(0)
+  //   .max(10)
+  //   .step(0.001)
+  //   .name("uBigWavesFrequencyY");
+  // gui
+  //   .addColor(debugObject, "depthColor")
+  //   .onChange(() => uDepthColor.value.set(debugObject.depthColor));
+
+  // gui
+  //   .addColor(debugObject, "surfaceColor")
+  //   .onChange(() => uSurfaceColor.value.set(debugObject.surfaceColor));
+  // gui
+  //   .add(uBigWavesSpeed, "value")
+  //   .min(0)
+  //   .max(4)
+  //   .step(0.001)
+  //   .name("uBigWavesSpeed");
+  // gui.add(uColorOffset, "value").min(0).max(1).step(0.001).name("uColorOffset");
+
+  // gui
+  //   .add(uColorMultiplier, "value")
+  //   .min(0)
+  //   .max(10)
+  //   .step(0.001)
+  //   .name("uColorMultiplier");
+  gui
+    .add(uSmallWavesElevation, "value")
+    .min(0)
+    .max(1)
+    .step(0.001)
+    .name("Small Waves Elevation");
+
+  gui
+    .add(uSmallWavesFrequency, "value")
+    .min(0)
+    .max(30)
+    .step(0.1)
+    .name("Small Waves Frequency");
+
+  gui
+    .add(uSmallWavesSpeed, "value")
+    .min(0)
+    .max(4)
+    .step(0.01)
+    .name("Small Waves Speed");
+
+  gui
+    .add(uSmallIterations, "value")
+    .min(1)
+    .max(5)
+    .step(1)
+    .name("Small Waves Iterations");
   /**
    * Sizes
    */
@@ -101,7 +234,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
     0.1,
     100,
   );
-  camera.position.set(0.25, -0.25, 1);
+  camera.position.set(1, 1, 1);
   scene.add(camera);
 
   /**
