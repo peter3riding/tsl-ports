@@ -1,22 +1,50 @@
 import GUI from "lil-gui";
 import * as THREE from "three/webgpu";
 import {
-  sin,
-  positionLocal,
-  time,
+  // Core
+  color,
+  uniform,
   vec2,
   vec3,
   vec4,
+  float,
+
+  // Time & Animation
+  time,
+
+  // Math
+  sin,
+  cos,
+  tan,
+  pow,
+  sqrt,
+  abs,
+  clamp,
+  mix,
+  step,
+  smoothstep,
+  add,
+  sub,
+  mul,
+  div,
+
+  // Geometry
+  positionLocal,
+  positionWorld,
+  normalLocal,
+  normalWorld,
+
+  // UV & Texturing
   uv,
-  uniform,
-  color,
-  fog,
-  rangeFogFactor,
+  texture,
+
+  // Post-processing & Fog
   pass,
   renderOutput,
+  fog,
+  rangeFogFactor,
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { sobel } from "three/addons/tsl/display/SobelOperatorNode.js";
 
 (async () => {
   /**
@@ -30,14 +58,36 @@ import { sobel } from "three/addons/tsl/display/SobelOperatorNode.js";
 
   // Scene
   const scene = new THREE.Scene();
+  scene.background = new THREE.Color("#0a0a0a");
 
-  const fogColor = uniform(color("#ffffff"));
-  scene.fogNode = fog(fogColor, rangeFogFactor(10, 15));
+  /**
+   * Textures
+   */
+  const textureLoader = new THREE.TextureLoader();
+
+  /**
+   * Test mesh
+   */
+  // Geometry
+  const geometry = new THREE.PlaneGeometry(1, 1, 32, 32);
+
+  // Material (TSL — fully node-based)
+  const material = new THREE.MeshBasicNodeMaterial();
+
+  // ─── UNIFORMS ───
+  const uTime = uniform(0);
+  const uColor = uniform(color("#ff0088"));
+
+  material.colorNode = uColor;
+
+  // Mesh
+  const mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
 
   /**
    * Sizes
    */
-  let sizes = {
+  const sizes = {
     width: window.innerWidth,
     height: window.innerHeight,
   };
@@ -46,79 +96,47 @@ import { sobel } from "three/addons/tsl/display/SobelOperatorNode.js";
    * Camera
    */
   const camera = new THREE.PerspectiveCamera(
-    25,
+    75,
     sizes.width / sizes.height,
     0.1,
     100,
   );
-  camera.position.set(6, 3, 10);
+  camera.position.set(0.25, -0.25, 1);
   scene.add(camera);
 
-  // Controls
+  /**
+   * Controls
+   */
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
 
   /**
-   * Renderer
+   * Renderer + Post-processing
    */
   const renderer = new THREE.WebGPURenderer({
     canvas: canvas,
     forceWebGL: false,
+    antialias: true, // ← nice default
   });
+
   renderer.setSize(sizes.width, sizes.height);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(fogColor.value);
 
-  // Required for new WebGPU / RenderPipeline API
-  await renderer.init();
+  // Required for WebGPU
+  try {
+    await renderer.init();
+  } catch (error) {
+    console.error("WebGPU init failed:", error);
+    return;
+  }
 
-  /**
-   * Post-processing (updated API)
-   */
   const postProcessing = new THREE.RenderPipeline(renderer);
   postProcessing.outputColorTransform = false;
 
   const scenePass = pass(scene, camera);
   const outputPass = renderOutput(scenePass);
 
-  postProcessing.outputNode = sobel(outputPass);
-
-  /**
-   * Dummy / Wobbly Torus
-   */
-  // Material
-  const material = new THREE.MeshBasicNodeMaterial();
-
-  // Uniforms
-  const timeFrequency = uniform(0.5);
-  const positionFrequency = uniform(2);
-  const intensityFrequency = uniform(0.5);
-
-  // Position node
-  const oscillation = sin(
-    time.mul(timeFrequency).add(positionLocal.y.mul(positionFrequency)),
-  ).mul(intensityFrequency);
-
-  material.positionNode = vec3(
-    positionLocal.x.add(oscillation),
-    positionLocal.y,
-    positionLocal.z,
-  );
-
-  // Color node
-  material.colorNode = vec4(uv().mul(vec2(32, 8)).fract(), 1, 1);
-
-  // Mesh
-  const torusKnot = new THREE.Mesh(
-    new THREE.TorusKnotGeometry(1, 0.35, 128, 32),
-    material,
-  );
-  scene.add(torusKnot);
-
-  // GUI
-  gui.add(timeFrequency, "value").min(0).max(5).name("timeFrequency");
-  gui.add(positionFrequency, "value").min(0).max(5).name("positionFrequency");
-  gui.add(intensityFrequency, "value").min(0).max(5).name("intensityFrequency");
+  postProcessing.outputNode = outputPass;
 
   /**
    * Resize handler
@@ -137,9 +155,16 @@ import { sobel } from "three/addons/tsl/display/SobelOperatorNode.js";
   /**
    * Animate
    */
+  const timer = new THREE.Timer();
+
   const tick = () => {
+    timer.update();
+    uTime.value = timer.getElapsed();
+
     controls.update();
-    postProcessing.render(); //
+
+    // Modern WebGPU render
+    postProcessing.render();
   };
 
   renderer.setAnimationLoop(tick);
