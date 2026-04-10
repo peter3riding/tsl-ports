@@ -116,7 +116,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
   // Position twist
   material.positionNode = Fn(() => {
-    const p = positionLocal.toVar();
+    const p = positionLocal;
     const angle = p.y.add(uTime).mul(0.9);
     const rotated = rotate(p.xz, angle);
     p.x = rotated.x;
@@ -127,7 +127,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
   // Normal correction
 
   material.normalNode = Fn(() => {
-    const n = normalLocal.toVar();
+    const n = normalLocal;
 
     // Use the same angle as positionNode
     const angle = positionLocal.y.add(uTime).mul(0.9);
