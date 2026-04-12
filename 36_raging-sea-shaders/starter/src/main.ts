@@ -2,6 +2,7 @@ import GUI from "lil-gui";
 import * as THREE from "three/webgpu";
 import {
   // Core
+  MeshNormalNodeMaterial,
   color,
   uniform,
   vec2,
@@ -10,6 +11,8 @@ import {
   float,
   Loop,
   Fn,
+  transformNormalToView,
+  normalize,
 
   // Time & Animation
   time,
@@ -29,6 +32,7 @@ import {
   sub,
   mul,
   div,
+  cross,
 
   // Geometry
   positionLocal,
@@ -76,8 +80,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   };
 
   const debugObject: debugObjectType = {
-    depthColor: "#186691",
-    surfaceColor: "#9bd8ff",
+    depthColor: "#ff4000",
+    surfaceColor: "#151c37",
   };
 
   // ─── UNIFORMS ───
@@ -88,8 +92,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   const uBigWavesSpeed = uniform(0.75);
   const uDepthColor = uniform(color(debugObject.depthColor));
   const uSurfaceColor = uniform(color(debugObject.surfaceColor));
-  const uColorOffset = uniform(0.22);
-  const uColorMultiplier = uniform(3);
+  const uColorOffset = uniform(0.925);
+  const uColorMultiplier = uniform(1);
   const uSmallWavesFrequency = uniform(3);
   const uSmallWavesElevation = uniform(0.15);
   const uSmallIterations = uniform(4);
@@ -99,7 +103,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   const waterGeometry = new THREE.PlaneGeometry(2, 2, 512, 512);
 
   // Material
-  const waterMaterial = new THREE.MeshBasicNodeMaterial();
+  const waterMaterial = new THREE.MeshNormalNodeMaterial();
 
   // Mesh
   const water = new THREE.Mesh(waterGeometry, waterMaterial);
@@ -107,26 +111,18 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   scene.add(water);
 
   // Vertex
-  const wavesElevation = Fn(() => {
+  const wavesElevation = Fn(([position]: [any]) => {
     // Big waves
     let elevation = mul(
-      sin(
-        positionLocal.x
-          .mul(uBigWavesFrequency.x)
-          .add(uTime.mul(uBigWavesSpeed)),
-      ),
-      sin(
-        positionLocal.z
-          .mul(uBigWavesFrequency.y)
-          .add(uTime.mul(uBigWavesSpeed)),
-      ),
+      sin(position.x.mul(uBigWavesFrequency.x).add(uTime.mul(uBigWavesSpeed))),
+      sin(position.z.mul(uBigWavesFrequency.y).add(uTime.mul(uBigWavesSpeed))),
     );
     elevation.mulAssign(uBigWavesElevation);
 
     // Small waves
     Loop({ start: float(1), end: uSmallIterations }, ({ i }) => {
       const noiseInput = vec3(
-        positionLocal.xz.add(1).mul(uSmallWavesFrequency).mul(i), // +1 avoids seam
+        position.xz.add(1).mul(uSmallWavesFrequency).mul(i), // +1 avoids seam
         uTime.mul(uSmallWavesSpeed),
       );
 
@@ -142,8 +138,31 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
     return elevation;
   });
 
+  // Update Normals
+  const updateNormals = Fn(() => {
+    const shift = float(0.01);
+    let positionL = positionLocal.toVar();
+
+    // Calculate positions
+    const positionA = positionLocal.xyz.add(vec3(shift, 0, 0));
+    const positionB = positionLocal.xyz.add(vec3(0, 0, shift.negate()));
+
+    // Update Elevation
+    positionL.y.addAssign(wavesElevation(positionL));
+    positionA.y.addAssign(wavesElevation(positionA));
+    positionB.y.addAssign(wavesElevation(positionB));
+
+    // Calculate Distance
+    const toA = positionA.sub(positionL);
+    const toB = positionB.sub(positionL);
+
+    return transformNormalToView(normalize(cross(toA, toB)));
+  });
+
+  waterMaterial.normalNode = updateNormals();
+
   // Apply to material 'Y' position
-  const elevation = wavesElevation();
+  const elevation = wavesElevation(positionLocal);
   waterMaterial.positionNode = positionLocal.add(vec3(0, elevation, 0));
 
   // Fragment
