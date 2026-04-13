@@ -1,0 +1,653 @@
+import GUI from "lil-gui";
+import * as THREE from "three/webgpu";
+import {
+  // Core
+  color,
+  uniform,
+  vec2,
+  vec3,
+  vec4,
+  float,
+  Loop,
+  Fn,
+  varying,
+
+  // Time & Animation
+  time,
+
+  // Math
+  sin,
+  cos,
+  tan,
+  pow,
+  sqrt,
+  abs,
+  clamp,
+  mix,
+  step,
+  smoothstep,
+  add,
+  sub,
+  mul,
+  div,
+  cross,
+  normalize,
+  negate,
+  transformNormalToView,
+
+  // Geometry
+  positionLocal,
+  positionWorld,
+  normalLocal,
+  normalWorld,
+
+  // Noise
+  mx_noise_float,
+
+  // UV & Texturing
+  uv,
+  texture,
+
+  // Post-processing & Fog
+  pass,
+  renderOutput,
+  fog,
+  rangeFogFactor,
+  modelPosition,
+  cameraPosition,
+} from "three/tsl";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+(async () => {
+  /**
+   * Base
+   */
+  // Debug
+  const gui = new GUI({ width: 400 });
+
+  // Canvas
+  const canvas = document.querySelector("canvas.webgl") as HTMLCanvasElement;
+
+  // Scene
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color("#0a0a0a");
+
+  /**
+   * Water
+   */
+  // Colors
+  type debugObjectType = {
+    depthColor: string;
+    surfaceColor: string;
+  };
+
+  const debugObject: debugObjectType = {
+    depthColor: "#ff4000",
+    surfaceColor: "#151c37",
+  };
+
+  // ─── UNIFORMS ───
+  const uTime = uniform(0);
+  const uColor = uniform(color(0.5, 0.8, 1.0));
+  const uBigWavesElevation = uniform(0.2);
+  const uBigWavesFrequency = uniform(vec2(4, 1.5));
+  const uBigWavesSpeed = uniform(0.75);
+  const uDepthColor = uniform(color(debugObject.depthColor));
+  const uSurfaceColor = uniform(color(debugObject.surfaceColor));
+  const uColorOffset = uniform(0.925);
+  const uColorMultiplier = uniform(1);
+  const uSmallWavesFrequency = uniform(3);
+  const uSmallWavesElevation = uniform(0.15);
+  const uSmallWavesSpeed = uniform(0.2);
+
+  // Geometry
+  const waterGeometry = new THREE.PlaneGeometry(10, 10, 512, 512);
+
+  // Material
+  const waterMaterial = new THREE.MeshPhysicalNodeMaterial({
+    metalness: 0.0,
+    roughness: 0.1,
+  });
+
+  // Mesh
+  const water = new THREE.Mesh(waterGeometry, waterMaterial);
+  water.rotation.x = -Math.PI * 0.5;
+  scene.add(water);
+
+  /**
+   * Lights
+   */
+  const ambientLight = new THREE.AmbientLight("#ffffff", 0.5);
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight("#ffffff", 1.0);
+  directionalLight.position.set(1, 1, 1);
+  scene.add(directionalLight);
+
+  // Vertex
+  // ─── FINAL WORKING VERSION (single-parameter Fn - no array destructuring) ───
+  const vNormal = varying(vec3(), "vNormal");
+
+  // Displacement + normal in ONE positionNode (vertex stage)
+  waterMaterial.positionNode = Fn(() => {
+    const pos = positionLocal.toVar();
+
+    // Inline wavesElevation calculation
+    let elevation = float(0);
+    
+    // Big waves
+    elevation.addAssign(
+      sin(pos.x.mul(uBigWavesFrequency.x).add(uTime.mul(uBigWavesSpeed)))
+        .mul(sin(pos.z.mul(uBigWavesFrequency.y).add(uTime.mul(uBigWavesSpeed))))
+        .mul(uBigWavesElevation)
+    );
+
+    // Small waves
+    Loop({ start: float(1), end: float(4) }, ({ i }) => {
+      const noiseInput = vec3(
+        pos.xz.add(1).mul(uSmallWavesFrequency).mul(i),
+        uTime.mul(uSmallWavesSpeed),
+      );
+
+      const wave = abs(
+        mx_noise_float(noiseInput, 1, 0).mul(uSmallWavesElevation).div(i),
+      );
+
+      elevation.subAssign(wave);
+    });
+
+    pos.y.addAssign(elevation);
+
+    // Finite difference for normal
+    const delta = float(0.015);
+    const pX = positionLocal.add(vec3(delta, 0, 0)).toVar();
+    const pZ = positionLocal.add(vec3(0, 0, delta)).toVar();
+
+    // Calculate elevation for neighboring points
+    let elevX = float(0);
+    elevX.addAssign(
+      sin(pX.x.mul(uBigWavesFrequency.x).add(uTime.mul(uBigWavesSpeed)))
+        .mul(sin(pX.z.mul(uBigWavesFrequency.y).add(uTime.mul(uBigWavesSpeed))))
+        .mul(uBigWavesElevation)
+    );
+    Loop({ start: float(1), end: float(4) }, ({ i }) => {
+      const noiseInput = vec3(
+        pX.xz.add(1).mul(uSmallWavesFrequency).mul(i),
+        uTime.mul(uSmallWavesSpeed),
+      );
+      const wave = abs(
+        mx_noise_float(noiseInput, 1, 0).mul(uSmallWavesElevation).div(i),
+      );
+      elevX.subAssign(wave);
+    });
+
+    let elevZ = float(0);
+    elevZ.addAssign(
+      sin(pZ.x.mul(uBigWavesFrequency.x).add(uTime.mul(uBigWavesSpeed)))
+        .mul(sin(pZ.z.mul(uBigWavesFrequency.y).add(uTime.mul(uBigWavesSpeed))))
+        .mul(uBigWavesElevation)
+    );
+    Loop({ start: float(1), end: float(4) }, ({ i }) => {
+      const noiseInput = vec3(
+        pZ.xz.add(1).mul(uSmallWavesFrequency).mul(i),
+        uTime.mul(uSmallWavesSpeed),
+      );
+      const wave = abs(
+        mx_noise_float(noiseInput, 1, 0).mul(uSmallWavesElevation).div(i),
+      );
+      elevZ.subAssign(wave);
+    });
+
+    pX.y.addAssign(elevX);
+    pZ.y.addAssign(elevZ);
+
+    const tangent = pX.sub(pos);
+    const bitangent = pZ.sub(pos);
+
+    vNormal.assign(cross(bitangent, tangent).normalize());
+
+    return pos;
+  })();
+
+  // Normal (must be in view space for MeshPhysicalNodeMaterial)
+  waterMaterial.normalNode = transformNormalToView(vNormal);
+
+  // Water color based on depth
+  waterMaterial.colorNode = Fn(() => {
+    const viewDir = modelPosition.sub(cameraPosition).normalize();
+    const depth = viewDir.dot(normalize(vNormal)).abs();
+    const colorMix = mix(uDepthColor, uSurfaceColor, depth.mul(uColorMultiplier).add(uColorOffset));
+    return colorMix;
+  })();
+
+  // GUI controls
+  gui
+    .addColor(debugObject, "depthColor")
+    .onChange(() => uDepthColor.value.set(debugObject.depthColor));
+
+  gui
+    .addColor(debugObject, "surfaceColor")
+    .onChange(() => uSurfaceColor.value.set(debugObject.surfaceColor));
+
+  gui.add(uColorOffset, "value").min(0).max(1).step(0.001).name("uColorOffset");
+
+  gui
+    .add(uColorMultiplier, "value")
+    .min(0)
+    .max(10)
+    .step(0.001)
+    .name("uColorMultiplier");
+
+  gui
+    .add(uSmallWavesElevation, "value")
+    .min(0)
+    .max(1)
+    .step(0.001)
+    .name("Small Waves Elevation");
+
+  gui
+    .add(uSmallWavesFrequency, "value")
+    .min(0)
+    .max(30)
+    .step(0.1)
+    .name("Small Waves Frequency");
+
+  gui
+    .add(uSmallWavesSpeed, "value")
+    .min(0)
+    .max(4)
+    .step(0.01)
+    .name("Small Waves Speed");
+
+  /**
+   * Sizes
+   */
+  const sizes = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
+
+  /**
+   * Camera
+   */
+  const camera = new THREE.PerspectiveCamera(
+    75,
+    sizes.width / sizes.height,
+    0.1,
+    100,
+  );
+  camera.position.set(1, 1, 1);
+  scene.add(camera);
+
+  /**
+   * Controls
+   */
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+
+  /**
+   * Renderer + Post-processing
+   */
+  const renderer = new THREE.WebGPURenderer({
+    canvas: canvas,
+    forceWebGL: false,
+    antialias: true,
+  });
+
+  renderer.setSize(sizes.width, sizes.height);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  // Required for WebGPU
+  try {
+    await renderer.init();
+  } catch (error) {
+    console.error("WebGPU init failed:", error);
+    return;
+  }
+
+  const postProcessing = new THREE.RenderPipeline(renderer);
+  postProcessing.outputColorTransform = false;
+
+  const scenePass = pass(scene, camera);
+  const outputPass = renderOutput(scenePass);
+
+  postProcessing.outputNode = outputPass;
+
+  /**
+   * Resize handler
+   */
+  window.addEventListener("resize", () => {
+    sizes.width = window.innerWidth;
+    sizes.height = window.innerHeight;
+
+    camera.aspect = sizes.width / sizes.height;
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(sizes.width, sizes.height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  });
+
+  /**
+   * Animate
+   */
+  const timer = new THREE.Timer();
+
+  const tick = () => {
+    timer.update();
+    uTime.value = timer.getElapsed();
+
+    controls.update();
+
+    // Modern WebGPU render
+    postProcessing.render();
+  };
+
+  renderer.setAnimationLoop(tick);
+})();
+
+  // Post-processing & Fog
+  pass,
+  renderOutput,
+  fog,
+  rangeFogFactor,
+  modelPosition,
+  cameraPosition,
+} from "three/tsl";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+(async () => {
+  /**
+   * Base
+   */
+  // Debug
+  const gui = new GUI({ width: 400 });
+
+  // Canvas
+  const canvas = document.querySelector("canvas.webgl") as HTMLCanvasElement;
+  if (!canvas) {
+    console.error("Canvas not found!");
+    return;
+  }
+  console.log("Canvas found:", canvas);
+
+  // Scene
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color("#0a0a0a");
+
+  /**
+   * Water
+   */
+  // Colors
+  type debugObjectType = {
+    depthColor: string;
+    surfaceColor: string;
+  };
+
+  const debugObject: debugObjectType = {
+    depthColor: "#ff4000",
+    surfaceColor: "#151c37",
+  };
+
+  // ─── UNIFORMS ───
+  const uTime = uniform(0);
+  const uColor = uniform(color(0.5, 0.8, 1.0));
+  const uBigWavesElevation = uniform(0.2);
+  const uBigWavesFrequency = uniform(vec2(4, 1.5));
+  const uBigWavesSpeed = uniform(0.75);
+  const uDepthColor = uniform(color(debugObject.depthColor));
+  const uSurfaceColor = uniform(color(debugObject.surfaceColor));
+  const uColorOffset = uniform(0.925);
+  const uColorMultiplier = uniform(1);
+  const uSmallWavesFrequency = uniform(3);
+  const uSmallWavesElevation = uniform(0.15);
+  const uSmallWavesSpeed = uniform(0.2);
+
+  // Geometry
+  const waterGeometry = new THREE.PlaneGeometry(10, 10, 512, 512);
+
+  // Material
+  const waterMaterial = new THREE.MeshPhysicalNodeMaterial({
+    metalness: 0.0,
+    roughness: 0.1,
+  });
+
+  // Water color based on depth
+  waterMaterial.colorNode = Fn(() => {
+    const viewDir = modelPosition.sub(cameraPosition).normalize();
+    const depth = viewDir.dot(normalize(vNormal)).abs();
+    const colorMix = mix(uDepthColor, uSurfaceColor, depth.mul(uColorMultiplier).add(uColorOffset));
+    return colorMix;
+  })();
+
+  // Mesh
+  const water = new THREE.Mesh(waterGeometry, waterMaterial);
+  water.rotation.x = -Math.PI * 0.5;
+  scene.add(water);
+
+  /**
+   * Lights
+   */
+  const ambientLight = new THREE.AmbientLight("#ffffff", 0.5);
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight("#ffffff", 1.0);
+  directionalLight.position.set(1, 1, 1);
+  scene.add(directionalLight);
+
+  // Add a simple test cube
+
+  // Vertex
+  // ─── FINAL WORKING VERSION (single-parameter Fn - no array destructuring) ───
+  const vNormal = varying(vec3(), "vNormal");
+
+  // Displacement + normal in ONE positionNode (vertex stage)
+  waterMaterial.positionNode = Fn(() => {
+  //   const pos = positionLocal.toVar();
+
+  //   // Inline wavesElevation calculation
+  //   let elevation = float(0);
+
+  //   // Big waves
+  //   elevation.addAssign(
+  //     sin(pos.x.mul(uBigWavesFrequency.x).add(uTime.mul(uBigWavesSpeed)))
+  //       .mul(sin(pos.z.mul(uBigWavesFrequency.y).add(uTime.mul(uBigWavesSpeed))))
+  //       .mul(uBigWavesElevation)
+  //   );
+
+  //   // Small waves
+  //   Loop({ start: float(1), end: float(4) }, ({ i }) => {
+  //     const noiseInput = vec3(
+  //       pos.xz.add(1).mul(uSmallWavesFrequency).mul(i),
+  //       uTime.mul(uSmallWavesSpeed),
+  //     );
+
+  //     const wave = abs(
+  //       mx_noise_float(noiseInput, 1, 0).mul(uSmallWavesElevation).div(i),
+  //     );
+
+  //     elevation.subAssign(wave);
+  //   });
+
+  //   pos.y.addAssign(elevation);
+
+  //   // Finite difference for normal
+  //   const delta = float(0.015);
+  //   const pX = positionLocal.add(vec3(delta, 0, 0)).toVar();
+  //   const pZ = positionLocal.add(vec3(0, 0, delta)).toVar();
+
+  //   // Calculate elevation for neighboring points
+  //   let elevX = float(0);
+  //   elevX.addAssign(
+  //     sin(pX.x.mul(uBigWavesFrequency.x).add(uTime.mul(uBigWavesSpeed)))
+  //       .mul(sin(pX.z.mul(uBigWavesFrequency.y).add(uTime.mul(uBigWavesSpeed))))
+  //       .mul(uBigWavesElevation)
+  //   );
+  //   Loop({ start: float(1), end: float(4) }, ({ i }) => {
+  //     const noiseInput = vec3(
+  //       pX.xz.add(1).mul(uSmallWavesFrequency).mul(i),
+  //       uTime.mul(uSmallWavesSpeed),
+  //     );
+  //     const wave = abs(
+  //       mx_noise_float(noiseInput, 1, 0).mul(uSmallWavesElevation).div(i),
+  //     );
+  //     elevX.subAssign(wave);
+  //   });
+
+  //   let elevZ = float(0);
+  //   elevZ.addAssign(
+  //     sin(pZ.x.mul(uBigWavesFrequency.x).add(uTime.mul(uBigWavesSpeed)))
+  //       .mul(sin(pZ.z.mul(uBigWavesFrequency.y).add(uTime.mul(uBigWavesSpeed))))
+  //       .mul(uBigWavesElevation)
+  //   );
+  //   Loop({ start: float(1), end: float(4) }, ({ i }) => {
+  //     const noiseInput = vec3(
+  //       pZ.xz.add(1).mul(uSmallWavesFrequency).mul(i),
+  //       uTime.mul(uSmallWavesSpeed),
+  //     );
+  //     const wave = abs(
+  //       mx_noise_float(noiseInput, 1, 0).mul(uSmallWavesElevation).div(i),
+  //     );
+  //     elevZ.subAssign(wave);
+  //   });
+
+  //   pX.y.addAssign(elevX);
+  //   pZ.y.addAssign(elevZ);
+
+  //   const tangent = pX.sub(pos);
+    vNormal.assign(cross(bitangent, tangent).normalize());
+
+    return pos;
+  })();
+
+  // Normal (must be in view space for MeshPhysicalNodeMaterial)
+  waterMaterial.normalNode = transformNormalToView(vNormal);
+
+  // Water color based on depth
+  waterMaterial.colorNode = Fn(() => {
+    const viewDir = modelPosition.sub(cameraPosition).normalize();
+    const depth = viewDir.dot(normalize(vNormal)).abs();
+    const colorMix = mix(
+      uDepthColor,
+      uSurfaceColor,
+      depth.mul(uColorMultiplier).add(uColorOffset),
+    );
+    return colorMix;
+  })();
+
+  waterMaterial.needsUpdate = true;
+
+  // Tweaks
+  // gui
+  //   .add(uBigWavesElevation, "value")
+  //   .min(0)
+  //   .max(1)
+  //   .step(0.001)
+  //   .name("uBigWavesElevation");
+  // gui
+  //   .add(uBigWavesFrequency.value, "x")
+  //   .min(0)
+  //   .max(10)
+  //   .step(0.001)
+  //   .name("uBigWavesFrequencyX");
+  // gui
+  //   .add(uBigWavesFrequency.value, "y")
+  //   .min(0)
+  //   .max(10)
+  //   .step(0.001)
+  //   .name("uBigWavesFrequencyY");
+  gui
+    .addColor(debugObject, "depthColor")
+    .onChange(() => uDepthColor.value.set(debugObject.depthColor));
+
+  gui
+    .addColor(debugObject, "surfaceColor")
+    .onChange(() => uSurfaceColor.value.set(debugObject.surfaceColor));
+  // gui
+  //   .add(uBigWavesSpeed, "value")
+  //   .min(0)
+  //   .max(4)
+  //   .step(0.001)
+  //   .name("uBigWavesSpeed");
+  gui.add(uColorOffset, "value").min(0).max(1).step(0.001).name("uColorOffset");
+
+  gui
+    .add(uColorMultiplier, "value")
+    .min(0)
+    .max(10)
+    .step(0.001)
+    .name("uColorMultiplier");
+  gui
+    .add(uSmallWavesElevation, "value")
+    .min(0)
+    .max(1)
+    .step(0.001)
+    .name("Small Waves Elevation");
+
+  gui
+    .add(uSmallWavesFrequency, "value")
+    .min(0)
+    .max(30)
+    .step(0.1)
+    .name("Small Waves Frequency");
+
+  gui
+    .add(uSmallWavesSpeed, "value")
+    .min(0)
+    .max(4)
+    .step(0.01)
+    .name("Small Waves Speed");
+  /**
+   * Sizes
+   */
+  const sizes = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
+
+  /**
+   * Camera
+   */
+  const camera = new THREE.PerspectiveCamera(
+    75,
+    sizes.width / sizes.height,
+    0.1,
+    100,
+  );
+  camera.position.set(0, 5, 0);
+  scene.add(camera);
+
+  /**
+   * Controls
+   */
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.target.set(0, 0, 0);
+
+  /**
+   * Renderer + Post-processing
+   */
+  console.log("Creating WebGLRenderer for testing...");
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    antialias: true,
+  });
+  console.log("WebGLRenderer created:", renderer);
+
+  renderer.setSize(sizes.width, sizes.height);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  console.log("Renderer size set:", sizes.width, sizes.height);
+
+  // Simple direct rendering without post-processing
+  const tick = () => {
+    timer.update();
+    uTime.value = timer.getElapsed();
+
+    controls.update();
+
+    console.log("Rendering frame...");
+    renderer.render(scene, camera);
+  };
+
+  console.log("Starting animation loop...");
+  renderer.setAnimationLoop(tick);
+})();
