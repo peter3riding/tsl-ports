@@ -2,7 +2,6 @@ import GUI from "lil-gui";
 import * as THREE from "three/webgpu";
 import {
   // Core
-  MeshNormalNodeMaterial,
   color,
   uniform,
   vec2,
@@ -103,7 +102,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   const waterGeometry = new THREE.PlaneGeometry(2, 2, 512, 512);
 
   // Material
-  const waterMaterial = new THREE.MeshNormalNodeMaterial();
+  //const waterMaterial = new THREE.MeshNormalNodeMaterial();
+  const waterMaterial = new THREE.MeshBasicNodeMaterial();
 
   // Mesh
   const water = new THREE.Mesh(waterGeometry, waterMaterial);
@@ -166,7 +166,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   waterMaterial.positionNode = positionLocal.add(vec3(0, elevation, 0));
 
   // Fragment
-  const mixStrength = elevation.add(uColorOffset).mul(uColorMultiplier);
+  let mixStrength = elevation.add(uColorOffset).mul(uColorMultiplier);
+  mixStrength = smoothstep(0, 1, mixStrength);
   waterMaterial.colorNode = mix(uDepthColor, uSurfaceColor, mixStrength);
 
   // Tweaks
