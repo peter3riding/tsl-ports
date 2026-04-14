@@ -8,6 +8,8 @@ import {
   vec3,
   vec4,
   float,
+  Fn,
+  rotateUV,
 
   // Time & Animation
   time,
@@ -43,6 +45,7 @@ import {
   renderOutput,
   fog,
   rangeFogFactor,
+  rotate,
 } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -158,13 +161,85 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
   });
 
   /**
+   * Smoke
+   */
+  // Uniforms
+  const uTime = uniform(float(0));
+  // Geometry
+  const smokeGeometry = new THREE.PlaneGeometry(1, 1, 16, 64);
+  smokeGeometry.translate(0, 0.5, 0);
+  smokeGeometry.scale(1.5, 6, 1.5);
+
+  const smokeTexture = await textureLoader.loadAsync("./perlin.png");
+
+  smokeTexture.wrapS = THREE.RepeatWrapping;
+  smokeTexture.wrapT = THREE.RepeatWrapping;
+  smokeTexture.colorSpace = THREE.NoColorSpace;
+
+  const perlin = texture(smokeTexture);
+
+  const smokeMaterial = new THREE.MeshBasicNodeMaterial({
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+    // wireframe: true,
+  });
+
+  const transformSmoke = Fn(() => {
+    // Twist
+    const twist = texture(
+      perlin,
+      vec2(0.5, uv().y.sub(time.mul(0.005)).mul(0.2)),
+    ).r.mul(10);
+
+    const positionXZ = rotateUV(positionLocal.xz, twist, vec2(0, 0));
+
+    // Wind
+    const windOffset = vec2(
+      texture(perlin, vec2(0.25, time.mul(0.01))).r.sub(0.5),
+      texture(perlin, vec2(0.75, time.mul(0.01))).r.sub(0.5),
+    ).mul(uv().y.pow(2).mul(10));
+
+    positionXZ.addAssign(windOffset);
+
+    return vec3(positionXZ.x, positionLocal.y, positionXZ.y);
+  });
+
+  smokeMaterial.positionNode = transformSmoke();
+
+  const smokeAlphaTransform = Fn(() => {
+    const smokeUv = uv()
+      .mul(vec2(0.5, 0.3))
+      .sub(vec2(0, uTime.mul(0.03)));
+    let smoke = perlin.sample(smokeUv).r;
+
+    // Remap
+    smoke = smoothstep(0.5, 1, smoke);
+
+    // Edges
+    const edgeFade = smoothstep(0.0, 0.1, uv().x) // left
+      .mul(smoothstep(1.0, 0.9, uv().x)) // right
+      .mul(smoothstep(1.0, 0.4, uv().y)) // top
+      .mul(smoothstep(0.0, 0.1, uv().y)); // bottom
+
+    return smoke.mul(edgeFade);
+  });
+
+  smokeMaterial.colorNode = vec4(0.6, 0.3, 0.2, smokeAlphaTransform());
+  //smokeMaterial.colorNode = vec4(1.0, 0.0, 0.0, 1.0);
+
+  const smoke = new THREE.Mesh(smokeGeometry, smokeMaterial);
+  smoke.position.y = 1.83;
+  scene.add(smoke);
+
+  /**
    * Animate
    */
   const timer = new THREE.Timer();
 
   const tick = () => {
     timer.update();
-
+    uTime.value = timer.getElapsed();
     controls.update();
 
     // WebGPU render
