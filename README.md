@@ -1,36 +1,29 @@
-# TSL Ports
+# Three.js TSL Shader Ports
 
-**Modern Three.js Shading Language (TSL) ports** of the Shaders module from [Bruno Simon’s Three.js Journey](https://threejs-journey.com).
+My personal deep-dive into **Three.js Shading Language (TSL)**.
 
-A clean, type-safe, production-ready collection of shader lessons rewritten from raw GLSL → **TSL + TypeScript**.
+This repository contains my ports of the Shaders module from [Bruno Simon’s Three.js Journey](https://threejs-journey.com/) — rewritten from raw GLSL into clean, modern **TSL + TypeScript**.
 
-![Three.js](https://img.shields.io/badge/Three.js-000000?style=flat&logo=three.js&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white)
-![TSL](https://img.shields.io/badge/TSL-FF6B00?style=flat&logo=three.js&logoColor=white)
+### Why I made this
 
-### Why this repository exists
+After finishing the entire Shaders module in raw GLSL, I decided to **port every lesson myself** into Three.js Shading Language (TSL) + TypeScript.
 
-After completing the entire **Shaders module (Lessons 27–44)** in raw GLSL, I’m now porting the best lessons to **Three.js Shading Language (TSL)** — the modern, node-based, WebGPU-ready way to write shaders in Three.js.
+This is a 100% personal learning project. I’ve made it public so anyone else can use it to get to grips with TSL as well.
 
-This repo serves as:
+### Repository Structure
 
-- A personal deep-dive into TSL mastery
-- A clean reference I can reuse in future projects and React Three Fiber
-
----
-
-### Goals
-
-- Master TSL syntax and best practices
-- Keep the exact same visual results as the original lessons plus changes
-- Prepare for the React Three Fiber chapter (Chapter 7) and real-world projects
-
----
+| Folder       | What’s inside                                  |
+| ------------ | ---------------------------------------------- |
+| `demos/`     | Polished versions with my own improvements     |
+| `exercises/` | Exact 1:1 ports of the original course lessons |
 
 ### Tech Stack
 
-- **Three.js** (latest) + **TSL** (Three.js Shading Language)
-- **TypeScript** (strict mode)
-- **Vite** (fast dev server + build)
-- Clean, minimal setup with excellent TypeScript support
+- Three.js (latest) + **TSL** (Three.js Shading Language)
+- TypeScript (strict mode)
+- Vite
+
+---
+
+**This is my public learning journal.**  
+Feel free to explore, use anything you find helpful, or open issues if something is unclear.
