@@ -29,6 +29,9 @@ import {
   sub,
   mul,
   div,
+  dot,
+  negate,
+  reflect,
 
   // Geometry
   positionLocal,
@@ -61,27 +64,170 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#0a0a0a");
 
+  // Loaders
+  const textureLoader = new THREE.TextureLoader();
+
+  // Textures
+  const earthDayTexture = await textureLoader.loadAsync("./earth/day.jpg");
+  earthDayTexture.colorSpace = THREE.SRGBColorSpace;
+  earthDayTexture.anisotropy = 8;
+
+  const earthNightTexture = await textureLoader.loadAsync("./earth/night.jpg");
+  earthNightTexture.colorSpace = THREE.SRGBColorSpace;
+  earthNightTexture.anisotropy = 8;
+
+  const specularCloudsTexture = await textureLoader.loadAsync(
+    "./earth/specularClouds.jpg",
+  );
+  specularCloudsTexture.anisotropy = 8;
+
   /**
-   * Earth (converted from your GLSL)
+   * Earth
    */
-  const geometry = new THREE.SphereGeometry(2, 64, 64);
+  const earthParameters = {
+    atmosphereDayColor: "#00aaff",
+    atmosphereTwilightColor: "#ff6600",
+  };
 
+  // Uniforms
+  const atmosphereDayColor = uniform(color(earthParameters.atmosphereDayColor));
+  const atmosphereTwilightColor = uniform(
+    color(earthParameters.atmosphereTwilightColor),
+  );
+
+  const earthGeometry = new THREE.SphereGeometry(2, 64, 64);
   const material = new THREE.MeshBasicNodeMaterial();
+  const earth = new THREE.Mesh(earthGeometry, material);
+  scene.add(earth);
 
-  // ─── TSL version of your GLSL shaders ───
+  // Atmosphere
+  const atmosphereMaterial = new THREE.MeshBasicNodeMaterial({
+    side: THREE.BackSide,
+    transparent: true,
+  });
+  const atmosphere = new THREE.Mesh(earthGeometry, atmosphereMaterial);
+  atmosphere.scale.set(1.04, 1.04, 1.04);
+  scene.add(atmosphere);
+
+  /**
+   * Sun
+   */
+  const sunSpherical = new THREE.Spherical(1, Math.PI * 0.5, 0.5);
+  const sunDirectionVec = new THREE.Vector3();
+
+  // placeholder values
+  const sunDirection = uniform(vec3(0, 0, 1));
+
+  const debugSun = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.1, 2),
+    new THREE.MeshBasicMaterial({ color: "#ffdd88" }),
+  );
+  scene.add(debugSun);
+
+  const updateSun = () => {
+    sunDirectionVec.setFromSpherical(sunSpherical);
+
+    // Move debug sun outside the Earth
+    debugSun.position.copy(sunDirectionVec).multiplyScalar(5);
+
+    // Update the uniform that the shader uses
+    sunDirection.value.copy(sunDirectionVec);
+  };
+
+  updateSun();
+
+  /**
+   * Day / Night Color
+   */
   material.colorNode = Fn(() => {
-    // Equivalent to your fragment shader
     const viewDirection = positionWorld.sub(cameraPosition).normalize();
-    const normal = normalWorld.normalize();
+    const sunOrientation = normalWorld.dot(sunDirection);
 
-    // Your exact color from GLSL: vec3(vUv, 1.0)
-    const color = vec3(uv(), 1.0);
+    // Textures
+    const dayColor = texture(earthDayTexture, uv()).rgb;
+    const nightColor = texture(earthNightTexture, uv()).rgb;
+    const specularCloudColor = texture(specularCloudsTexture, uv()).rg;
 
-    return color;
+    // Day Mix
+    const dayMix = smoothstep(-0.25, 0.5, sunOrientation);
+    let color = mix(nightColor, dayColor, dayMix);
+
+    // Clouds
+    const clouds = specularCloudColor.g.smoothstep(0.5, 1).mul(dayMix);
+    color = mix(color, vec3(1), clouds);
+
+    // Fresnel
+    const fresnel = viewDirection.dot(normalWorld).add(1).pow(2);
+
+    // Atmosphere
+    const atmosphereMix = sunOrientation.smoothstep(-0.5, 1);
+    const atmosphereColor = mix(
+      atmosphereTwilightColor,
+      atmosphereDayColor,
+      atmosphereMix,
+    );
+    color = mix(color, atmosphereColor, fresnel.mul(atmosphereMix));
+
+    // Specular
+    const reflection = reflect(sunDirection, normalWorld);
+    const specular = viewDirection
+      .dot(reflection)
+      .saturate()
+      .pow(32)
+      .mul(specularCloudColor.r);
+    const specularColor = mix(vec3(1), atmosphereColor, fresnel);
+
+    return color.add(specular.mul(specularColor));
   })();
 
-  const earth = new THREE.Mesh(geometry, material);
-  scene.add(earth);
+  atmosphereMaterial.colorNode = Fn(() => {
+    const viewDirection = positionWorld.sub(cameraPosition).normalize();
+    const sunOrientation = normalWorld.dot(sunDirection.negate());
+
+    // Atmosphere
+    const atmosphereDayMix = smoothstep(-0.5, 1, sunOrientation);
+    const atmosphereColor = mix(
+      atmosphereTwilightColor,
+      atmosphereDayColor,
+      atmosphereDayMix,
+    );
+
+    const color = mix(vec3(0), atmosphereColor, atmosphereDayMix);
+
+    // Edge Alpha
+    const edgeAlpha = viewDirection
+      .dot(normalWorld.negate())
+      .smoothstep(0, 0.5);
+
+    // Day Alpha
+    const dayAlpha = sunOrientation.smoothstep(-0.5, 0);
+
+    const alpha = edgeAlpha.mul(dayAlpha);
+
+    return vec4(color, alpha);
+  })();
+
+  // GUI
+  gui
+    .add(sunSpherical, "phi")
+    .min(0)
+    .max(Math.PI)
+    .name("sun phi")
+    .onChange(updateSun);
+
+  gui
+    .add(sunSpherical, "theta")
+    .min(-Math.PI)
+    .max(Math.PI)
+    .name("sun theta")
+    .onChange(updateSun);
+  gui.addColor(earthParameters, "atmosphereDayColor").onChange(() => {
+    atmosphereDayColor.value.set(earthParameters.atmosphereDayColor);
+  });
+
+  gui.addColor(earthParameters, "atmosphereTwilightColor").onChange(() => {
+    atmosphereTwilightColor.value.set(earthParameters.atmosphereTwilightColor);
+  });
 
   /**
    * Sizes
@@ -151,7 +297,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
   const tick = () => {
     controls.update();
 
-    // Modern WebGPU render (no manual uTime needed)
+    // Modern WebGPU render
     postProcessing.render();
   };
 
