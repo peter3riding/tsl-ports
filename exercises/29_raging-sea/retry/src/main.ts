@@ -9,6 +9,7 @@ import {
   vec4,
   float,
   Fn,
+  Loop,
 
   // Time & Animation
   time,
@@ -34,6 +35,8 @@ import {
   positionWorld,
   normalLocal,
   normalWorld,
+  mx_fractal_noise_float,
+  mx_noise_float,
 
   // UV & Texturing
   uv,
@@ -89,7 +92,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
   // ─── UNIFORMS ───
   const uTime = uniform(0);
-  const uColor = uniform(color("#ff0088"));
+  const uDepthColor = uniform(color(debugObject.depthColor));
+  const uSurfaceColor = uniform(color(debugObject.surfaceColor));
 
   // Mesh
   const mesh = new THREE.Mesh(geometry, material);
@@ -98,15 +102,29 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
   // Vertex
   const getElevation = Fn(([position]: [any]) => {
-    return float(-5);
+    let bigWaves = mul(
+      sin(position.x.mul(5).add(time)),
+      sin(position.z.mul(2).add(time)),
+    ).mul(0.1);
+
+    Loop({ start: float(1), end: 4 }, ({ i }) => {
+      const mxInput = vec3(position.xz.add(1).mul(3).mul(i), time.mul(0.2));
+
+      const smallWave = mx_noise_float(mxInput, 1, 0).mul(0.15).div(i).abs();
+      bigWaves.subAssign(smallWave);
+    });
+
+    return bigWaves;
   });
 
-  const elevation = getElevation(positionLocal.xz);
+  const elevation = getElevation(positionLocal);
 
   material.positionNode = positionLocal.add(vec3(0, elevation, 0));
 
   // Fragment
-  material.colorNode = uColor;
+  material.colorNode = Fn(() => {
+    return mix(uDepthColor, uSurfaceColor, positionLocal.y);
+  })();
 
   /**
    * Sizes
